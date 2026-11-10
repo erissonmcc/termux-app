@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - 'github-releases/**'
+      - 'erisson/keyboard-fix-0.118.3'
   pull_request:
     branches:
       - master
@@ -40,7 +41,7 @@ jobs:
           echo "APK_BASENAME_PREFIX=$APK_BASENAME_PREFIX" >> $GITHUB_ENV
 
           echo "Building APKs for '$RELEASE_VERSION_NAME' build"
-          export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}" # Used by app/build.gradle
+          # Keep the app versionName unchanged (0.118.3) for in-place updates.
           export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG" # Used by app/build.gradle
           if ! ./gradlew assembleDebug; then
             exit_on_error "Build failed for '$RELEASE_VERSION_NAME' build."
