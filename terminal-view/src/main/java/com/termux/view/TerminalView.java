@@ -78,6 +78,10 @@ public final class TerminalView extends View {
     /** Keep track of the time when a touch event leading to sending mouse scroll events started. */
     private long mMouseStartDownTime = -1;
 
+    /** A remote cursor response may request the keyboard once after a finger tap. */
+    static final long MOUSE_TAP_KEYBOARD_TIMEOUT_MILLIS = 3000;
+    private long mMouseTapKeyboardDeadline;
+
     final Scroller mScroller;
 
     /** What was left in from scrolling movement. */
@@ -139,6 +143,8 @@ public final class TerminalView extends View {
                 if (mEmulator != null && mEmulator.isMouseTrackingActive() && !event.isFromSource(InputDevice.SOURCE_MOUSE) && !isSelectingText() && !scrolledWithFinger) {
                     // Quick event processing when mouse tracking is active - do not wait for check of double tapping
                     // for zooming.
+                    requestFocus();
+                    mMouseTapKeyboardDeadline = SystemClock.uptimeMillis() + MOUSE_TAP_KEYBOARD_TIMEOUT_MILLIS;
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
                     return true;
@@ -285,6 +291,7 @@ public final class TerminalView extends View {
         if (session == mTermSession) return false;
         mTopRow = 0;
 
+        mMouseTapKeyboardDeadline = 0;
         mTermSession = session;
         mEmulator = null;
         mCombiningAccent = 0;
@@ -447,6 +454,15 @@ public final class TerminalView extends View {
     public void onScreenUpdated() {
         if (mEmulator == null) return;
 
+        // Read only this view's emulator: the shared cursor callback has no session identity.
+        // Use DECTCEM, not the cursor's local animation phase, and consume before showing IME.
+        if (!mEmulator.isMouseTrackingActive() || isSelectingText()) {
+            mMouseTapKeyboardDeadline = 0;
+        } else if (mMouseTapKeyboardDeadline > SystemClock.uptimeMillis() && mEmulator.isCursorEnabled()) {
+            mMouseTapKeyboardDeadline = 0;
+            mClient.onRequestSoftKeyboard();
+        }
+
         int rowsInHistory = mEmulator.getScreen().getActiveTranscriptRows();
         if (mTopRow < -rowsInHistory) mTopRow = -rowsInHistory;
 
@@ -590,6 +606,10 @@ public final class TerminalView extends View {
     public boolean onTouchEvent(MotionEvent event) {
         if (mEmulator == null) return true;
         final int action = event.getAction();
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_CANCEL
+            || event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
+            mMouseTapKeyboardDeadline = 0;
+        }
 
         if (isSelectingText()) {
             updateFloatingToolbarVisibility(event);
@@ -624,6 +644,12 @@ public final class TerminalView extends View {
 
         mGestureRecognizer.onTouchEvent(event);
         return true;
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        if (!hasWindowFocus) mMouseTapKeyboardDeadline = 0;
+        super.onWindowFocusChanged(hasWindowFocus);
     }
 
     @Override
@@ -1420,6 +1446,7 @@ public final class TerminalView extends View {
 
     @Override
     protected void onDetachedFromWindow() {
+        mMouseTapKeyboardDeadline = 0;
         super.onDetachedFromWindow();
 
         if (mTextSelectionCursorController != null) {
